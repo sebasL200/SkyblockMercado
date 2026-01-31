@@ -1,0 +1,13 @@
+name: MercadoSkyblock
+version: 1.0-SNAPSHOT
+main: me.cono200.mercadoSkyblock.MercadoSkyblock
+api-version: 1.21
+depend: [Vault, Essentials] # El plugin no iniciará si faltan estos
+commands:
+  vender:
+    description: Abre menú de venta
+    usage: /vender
+  madmin:  # <--- NUEVO
+    description: Comandos de administrador
+    usage: /madmin recuperar
+    permission: mercado.admin
