@@ -5,30 +5,26 @@ import com.github.stefvanschie.inventoryframework.gui.type.ChestGui;
 import com.github.stefvanschie.inventoryframework.pane.OutlinePane;
 import com.github.stefvanschie.inventoryframework.pane.PaginatedPane;
 import com.github.stefvanschie.inventoryframework.pane.StaticPane;
-import com.earth2me.essentials.Essentials;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
-import java.math.BigDecimal;
 import java.util.*;
 
 public class MenuVentas {
 
-    private final Essentials ess;
-
     public enum Categoria {
-        AGRICULTURA, COMIDA, MOBS, MADERAS, MINERALES, PIEDRAS, CONSTRUCCION, VARIOS, NINGUNA
+        AGRICULTURA, COMIDA, MOBS, MADERAS, MINERALES, PIEDRAS, CONSTRUCCION, NINGUNA
     }
 
-    public MenuVentas() {
-        this.ess = (Essentials) MercadoSkyblock.getInstance()
-                .getServer()
-                .getPluginManager()
-                .getPlugin("Essentials");
+    //PARA ORDENAR EN EL COMANDO
+    private enum Orden {
+        A_Z,
+        Z_A
     }
+
 
     // =========================
     // FUENTE ÚNICA DE CATEGORÍAS
@@ -41,6 +37,7 @@ public class MenuVentas {
     // NIVEL 1 - MENÚ PRINCIPAL
     // =========================
     public void abrirMenuPrincipal(Player player) {
+
         ChestGui gui = new ChestGui(3, "§1Mercado: Categorías");
         gui.setOnGlobalClick(e -> e.setCancelled(true));
 
@@ -59,17 +56,19 @@ public class MenuVentas {
     }
 
     // =========================
-    // BOTÓN DE CATEGORÍA (PERMISOS)
+    // BOTÓN DE CATEGORÍA (CON PERMISOS)
     // =========================
     private GuiItem crearBoton(Player player, Material icon, String nombre, Categoria cat) {
+
         String permiso = "mercado.categoria." + cat.name().toLowerCase();
 
+        // 🔒 CATEGORÍA BLOQUEADA
         if (!player.hasPermission(permiso)) {
+
             ItemStack locked = new ItemStack(Material.BARRIER);
             ItemMeta meta = locked.getItemMeta();
 
             meta.setDisplayName("§c✖ Categoría bloqueada");
-
             meta.setLore(List.of(
                     "§7Esta categoría está disponible",
                     "§7exclusivamente para jugadores",
@@ -81,10 +80,9 @@ public class MenuVentas {
             locked.setItemMeta(meta);
 
             return new GuiItem(locked, e -> {
-                // 🔊 Sonido elegante (no molesto)
-                player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.5f);
+                player.playSound(player.getLocation(),
+                        Sound.BLOCK_NOTE_BLOCK_PLING, 0.8f, 1.5f);
 
-                // 📝 Mensaje bonito en chat
                 player.sendMessage("");
                 player.sendMessage("§c⛔ §lACCESO BLOQUEADO");
                 player.sendMessage("§7Esta categoría es exclusiva para");
@@ -94,7 +92,6 @@ public class MenuVentas {
                 player.sendMessage("§e¡directamente desde tu isla!");
                 player.sendMessage("");
 
-                // 🟡 Título animado (muy vistoso)
                 player.sendTitle(
                         "§6★ RANGO PREMIUM ★",
                         "§7Desbloquea más categorías",
@@ -103,84 +100,87 @@ public class MenuVentas {
             });
         }
 
-
+        // ✅ CATEGORÍA DESBLOQUEADA
         ItemStack item = new ItemStack(icon);
         ItemMeta meta = item.getItemMeta();
+
         meta.setDisplayName(nombre);
         meta.setLore(List.of("§aClic para acceder"));
+
         item.setItemMeta(meta);
 
-        return new GuiItem(item, e -> abrirMenuCategoria(player, nombre, cat, false));
+        //return new GuiItem(item, e -> abrirMenuCategoria(player, nombre, cat));
+        return new GuiItem(item,
+                e -> abrirMenuCategoria(
+                        player,
+                        nombre,
+                        cat,
+                        Orden.A_Z,
+                        false
+                ));
+
     }
 
     // =========================
     // NIVEL 2 - MENÚ CATEGORÍA
     // =========================
-    private void abrirMenuCategoria(Player player, String titulo, Categoria categoria, boolean soloInventario) {
+    private void abrirMenuCategoria(
+            Player player,
+            String titulo,
+            Categoria categoria,
+            Orden orden,
+            boolean soloInventario
+    ) {
+
         ChestGui gui = new ChestGui(6, titulo);
         gui.setOnGlobalClick(e -> e.setCancelled(true));
 
         PaginatedPane paginas = new PaginatedPane(0, 0, 9, 5);
 
-        Set<Material> materialesCategoria =
-                getCategorias().getOrDefault(categoria, Collections.emptySet());
+        Set<Material> base = MercadoSkyblock.getInstance()
+                .getCategorias()
+                .getOrDefault(categoria, Collections.emptySet());
 
-        if (materialesCategoria.isEmpty()) {
-            player.sendMessage("§cEsta categoría no tiene ítems configurados.");
+        List<Material> materiales = new ArrayList<>();
+
+        for (Material mat : base) {
+            if (soloInventario && !player.getInventory().contains(mat)) continue;
+            if (MercadoSkyblock.getGestorPrecios().getPrecioActual(mat) <= 0) continue;
+            materiales.add(mat);
+        }
+
+        if (materiales.isEmpty()) {
+            player.sendMessage("§cNo hay ítems disponibles con estos filtros.");
             return;
         }
 
-        List<Material> materiales = new ArrayList<>(materialesCategoria);
+        // 🔤 ORDENAR
         materiales.sort(Comparator.comparing(Enum::name));
+        if (orden == Orden.Z_A) Collections.reverse(materiales);
 
         OutlinePane pagina = new OutlinePane(0, 0, 9, 5);
         int index = 0;
         int page = 0;
 
         for (Material mat : materiales) {
-            if (soloInventario && !player.getInventory().contains(mat)) continue;
 
-            double precioBase = 0;
-            boolean tienePrecio = false;
-
-            try {
-                BigDecimal bd = ess.getWorth().getPrice(ess, new ItemStack(mat));
-                if (bd != null) {
-                    precioBase = bd.doubleValue();
-                    tienePrecio = true;
-                }
-            } catch (Exception ignored) {}
+            double precio = MercadoSkyblock.getGestorPrecios().getPrecioActual(mat);
 
             ItemStack item = new ItemStack(mat);
             ItemMeta meta = item.getItemMeta();
-            List<String> lore = new ArrayList<>();
 
-            double precioFinal = 0;
-            if (tienePrecio) {
-                precioFinal = MercadoSkyblock.getGestorPrecios()
-                        .calcularPrecio(mat, precioBase);
-                lore.add("§7Base: §8$" + precioBase);
-                lore.add("§eActual: §6$" + String.format("%.2f", precioFinal));
-                lore.add("");
-                lore.add("§aClic para vender");
-            } else {
-                lore.add("§cSin precio en Essentials");
-                lore.add("§7Usa /setworth");
-            }
+            meta.setDisplayName("§f" + mat.name());
+            meta.setLore(List.of(
+                    "§7Precio:",
+                    "§6$" + String.format("%.2f", precio),
+                    "",
+                    "§aClic para vender"
+            ));
 
-            meta.setLore(lore);
             item.setItemMeta(meta);
 
-            final double precio = precioFinal;
-            final boolean puedeVender = tienePrecio;
-
-            pagina.addItem(new GuiItem(item, e -> {
-                if (puedeVender) {
-                    abrirMenuDetalle(player, mat, precio);
-                } else {
-                    player.sendMessage("§cEste ítem no tiene precio.");
-                }
-            }));
+            pagina.addItem(new GuiItem(item,
+                    e -> abrirMenuDetalle(player, mat, precio)));
 
             index++;
             if (index >= 45) {
@@ -194,43 +194,56 @@ public class MenuVentas {
         gui.addPane(paginas);
 
         // =========================
-        // NAVEGACIÓN
+        // 🔽 BARRA DE FILTROS
         // =========================
         StaticPane nav = new StaticPane(0, 5, 9, 1);
 
-        nav.addItem(new GuiItem(crearItemSimple(Material.ARROW, "§eAnterior"),
+        nav.addItem(new GuiItem(
+                crearItemSimple(Material.ARROW, "§e⬅ Anterior"),
                 e -> {
                     if (paginas.getPage() > 0) {
                         paginas.setPage(paginas.getPage() - 1);
                         gui.update();
                     }
-                }), 2, 0);
+                }), 0, 0);
 
         nav.addItem(new GuiItem(
-                crearItemSimple(Material.HOPPER,
-                        soloInventario ? "§aSolo inventario: ON" : "§7Solo inventario: OFF"),
-                e -> abrirMenuCategoria(player, titulo, categoria, !soloInventario)
+                crearItemSimple(Material.PAPER, "§bOrden: A–Z"),
+                e -> abrirMenuCategoria(player, titulo, categoria, Orden.A_Z, soloInventario)
+        ), 2, 0);
+
+        nav.addItem(new GuiItem(
+                crearItemSimple(
+                        Material.CHEST,
+                        soloInventario ? "§a🎒 Inventario: ON" : "§7🎒 Inventario: OFF"
+                ),
+                e -> abrirMenuCategoria(player, titulo, categoria, orden, !soloInventario)
         ), 4, 0);
 
-        nav.addItem(new GuiItem(crearItemSimple(Material.ARROW, "§eSiguiente"),
+        nav.addItem(new GuiItem(
+                crearItemSimple(Material.PAPER, "§bOrden: Z–A"),
+                e -> abrirMenuCategoria(player, titulo, categoria, Orden.Z_A, soloInventario)
+        ), 6, 0);
+
+        nav.addItem(new GuiItem(
+                crearItemSimple(Material.ARROW, "§eSiguiente ➡"),
                 e -> {
                     if (paginas.getPage() < paginas.getPages() - 1) {
                         paginas.setPage(paginas.getPage() + 1);
                         gui.update();
                     }
-                }), 6, 0);
-
-        nav.addItem(new GuiItem(crearItemSimple(Material.BARRIER, "§cVolver"),
-                e -> abrirMenuPrincipal(player)), 8, 0);
+                }), 8, 0);
 
         gui.addPane(nav);
         gui.show(player);
     }
 
+
     // =========================
     // NIVEL 3 - DETALLE
     // =========================
     private void abrirMenuDetalle(Player player, Material material, double precioUnitario) {
+
         ChestGui gui = new ChestGui(3, "Vender: " + material.name());
         gui.setOnGlobalClick(e -> e.setCancelled(true));
 
@@ -256,17 +269,23 @@ public class MenuVentas {
     // UTILIDADES
     // =========================
     private void vender(Player player, Material material, int cantidad, double precioUnitario) {
+
         if (cantidad <= 0) return;
         if (!player.getInventory().containsAtLeast(new ItemStack(material), cantidad)) return;
 
         player.getInventory().removeItem(new ItemStack(material, cantidad));
+
         double total = cantidad * precioUnitario;
 
         MercadoSkyblock.getEconomy().depositPlayer(player, total);
         MercadoSkyblock.getGestorPrecios().registrarVenta(material, cantidad);
 
-        player.sendMessage("§aVendiste x" + cantidad + " por §6$" + String.format("%.2f", total));
-        player.playSound(player.getLocation(), Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
+        player.sendMessage("§aVendiste x" + cantidad +
+                " por §6$" + String.format("%.2f", total));
+
+        player.playSound(player.getLocation(),
+                Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f);
+
         player.closeInventory();
     }
 

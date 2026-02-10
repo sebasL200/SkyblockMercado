@@ -6,10 +6,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.util.EnumMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.logging.Logger;
 
 public class MercadoSkyblock extends JavaPlugin {
@@ -17,13 +14,10 @@ public class MercadoSkyblock extends JavaPlugin {
     private static Economy econ = null;
     private static final Logger log = Logger.getLogger("Minecraft");
 
-    // Instancia del plugin
     private static MercadoSkyblock instance;
-
-    // Gestor de precios dinámicos
     private static GestorPrecios gestorPrecios;
 
-    // Categorías cargadas desde config.yml
+    // Categorías generadas automáticamente desde "precios:"
     private Map<MenuVentas.Categoria, Set<Material>> categorias;
 
     @Override
@@ -31,24 +25,20 @@ public class MercadoSkyblock extends JavaPlugin {
         instance = this;
         saveDefaultConfig();
 
-        // Conectar con Vault
         if (!setupEconomy()) {
             log.severe("[" + getDescription().getName() + "] - Vault no encontrado. Plugin desactivado.");
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
 
-        // Inicializar gestor de precios
         gestorPrecios = new GestorPrecios(this);
 
-        // Cargar categorías DESDE config.yml (CLAVE)
-        categorias = cargarCategorias();
+        // 🔥 CLAVE: construir categorías desde PRECIOS
+        categorias = cargarCategoriasDesdePrecios();
 
-        // Registrar comandos
         getCommand("vender").setExecutor(new ComandoVenta());
         getCommand("madmin").setExecutor(new ComandoAdmin());
 
-        // Registrar eventos
         getServer().getPluginManager().registerEvents(new ListenerCarteles(), this);
 
         getLogger().info("MercadoSkyblock activado correctamente");
@@ -76,44 +66,122 @@ public class MercadoSkyblock extends JavaPlugin {
     }
 
     // =========================
-    // CARGA DE CATEGORÍAS
+    // CATEGORÍAS DESDE "precios:"
     // =========================
-    private Map<MenuVentas.Categoria, Set<Material>> cargarCategorias() {
+    private Map<MenuVentas.Categoria, Set<Material>> cargarCategoriasDesdePrecios() {
+
         Map<MenuVentas.Categoria, Set<Material>> mapa =
                 new EnumMap<>(MenuVentas.Categoria.class);
 
-        ConfigurationSection section = getConfig().getConfigurationSection("categorias");
-        if (section == null) {
-            getLogger().warning("No se encontró la sección 'categorias' en config.yml");
+        // Inicializar sets vacíos
+        for (MenuVentas.Categoria cat : MenuVentas.Categoria.values()) {
+            mapa.put(cat, new HashSet<>());
+        }
+
+        ConfigurationSection precios = getConfig().getConfigurationSection("precios");
+        if (precios == null) {
+            getLogger().severe("No se encontró la sección 'precios' en config.yml");
             return mapa;
         }
 
-        for (String categoriaKey : section.getKeys(false)) {
-            try {
-                MenuVentas.Categoria categoria =
-                        MenuVentas.Categoria.valueOf(categoriaKey);
+        for (String key : precios.getKeys(false)) {
+            Material mat = Material.matchMaterial(key);
+            if (mat == null) {
+                getLogger().warning("Material inválido en precios: " + key);
+                continue;
+            }
 
-                Set<Material> materiales = new HashSet<>();
-
-                for (String matName : section.getStringList(categoriaKey)) {
-                    try {
-                        Material mat = Material.valueOf(matName);
-                        materiales.add(mat);
-                    } catch (IllegalArgumentException e) {
-                        getLogger().warning("Material inválido en config.yml: " + matName);
-                    }
-                }
-
-                mapa.put(categoria, materiales);
-                getLogger().info("Categoría cargada: " + categoria +
-                        " (" + materiales.size() + " items)");
-
-            } catch (IllegalArgumentException e) {
-                getLogger().warning("Categoría inválida en config.yml: " + categoriaKey);
+            MenuVentas.Categoria categoria = categorizarMaterial(mat);
+            if (categoria != MenuVentas.Categoria.NINGUNA) {
+                mapa.get(categoria).add(mat);
             }
         }
 
+        // Log de debug (muy útil)
+        for (MenuVentas.Categoria cat : mapa.keySet()) {
+            getLogger().info("Categoría " + cat + ": " + mapa.get(cat).size() + " ítems");
+        }
+
         return mapa;
+    }
+
+    // =========================
+    // CLASIFICACIÓN AUTOMÁTICA
+    // =========================
+    private MenuVentas.Categoria categorizarMaterial(Material mat) {
+
+        String name = mat.name();
+
+        if (name.contains("WHEAT") || name.contains("SEEDS") ||
+                name.contains("CARROT") || name.contains("POTATO") ||
+                name.contains("BEETROOT") || name.contains("MELON") ||
+                name.contains("PUMPKIN") || name.contains("CANE") ||
+                name.contains("BAMBOO") || name.contains("CACTUS") ||
+                name.contains("BERRY") || name.contains("WART") ||
+                name.contains("MUSHROOM") || name.contains("FUNGUS") ||
+                name.contains("VINE") || name.contains("AZALEA") ||
+                name.contains("HAY")) {
+            return MenuVentas.Categoria.AGRICULTURA;
+        }
+
+        if (name.contains("BEEF") || name.contains("PORK") ||
+                name.contains("CHICKEN") || name.contains("MUTTON") ||
+                name.contains("RABBIT") || name.contains("COD") ||
+                name.contains("SALMON") || name.contains("FISH") ||
+                name.contains("APPLE") || name.contains("HONEY")) {
+            return MenuVentas.Categoria.COMIDA;
+        }
+
+        if (name.contains("ROTTEN") || name.contains("BONE") ||
+                name.contains("STRING") || name.contains("SPIDER") ||
+                name.contains("GUNPOWDER") || name.contains("ENDER") ||
+                name.contains("BLAZE") || name.contains("GHAST") ||
+                name.contains("SLIME") || name.contains("PHANTOM") ||
+                name.contains("SHULKER") || name.contains("WITHER") ||
+                name.contains("FEATHER") || name.contains("LEATHER") ||
+                name.contains("INK") || name.contains("ARROW") ||
+                name.contains("TOTEM") || name.contains("SCUTE")) {
+            return MenuVentas.Categoria.MOBS;
+        }
+
+        if (name.contains("LOG") || name.contains("PLANK") ||
+                name.contains("LEAVES") || name.contains("SAPLING") ||
+                name.contains("STEM") || name.contains("WOOD") ||
+                name.contains("STICK")) {
+            return MenuVentas.Categoria.MADERAS;
+        }
+
+        if (name.contains("INGOT") || name.contains("ORE") ||
+                name.contains("BLOCK") || name.contains("NUGGET") ||
+                name.contains("DIAMOND") || name.contains("EMERALD") ||
+                name.contains("GOLD") || name.contains("IRON") ||
+                name.contains("COPPER") || name.contains("REDSTONE") ||
+                name.contains("LAPIS") || name.contains("QUARTZ") ||
+                name.contains("NETHERITE") || name.contains("AMETHYST") ||
+                name.contains("FLINT")) {
+            return MenuVentas.Categoria.MINERALES;
+        }
+
+        if (name.contains("STONE") || name.contains("COBBLE") ||
+                name.contains("GRANITE") || name.contains("DIORITE") ||
+                name.contains("ANDESITE") || name.contains("DEEPSLATE") ||
+                name.contains("SAND") || name.contains("GRAVEL") ||
+                name.contains("BASALT") || name.contains("BLACKSTONE") ||
+                name.contains("NETHERRACK") || name.contains("END_STONE") ||
+                name.contains("PURPUR")) {
+            return MenuVentas.Categoria.PIEDRAS;
+        }
+
+        if (name.contains("DIRT") || name.contains("GRASS") ||
+                name.contains("MUD") || name.contains("ICE") ||
+                name.contains("GLASS") || name.contains("BRICK") ||
+                name.contains("PRISMARINE") || name.contains("SEA_LANTERN") ||
+                name.contains("SPONGE") || name.contains("BEACON") ||
+                name.contains("CONDUIT")) {
+            return MenuVentas.Categoria.CONSTRUCCION;
+        }
+
+        return MenuVentas.Categoria.NINGUNA;
     }
 
     // =========================
