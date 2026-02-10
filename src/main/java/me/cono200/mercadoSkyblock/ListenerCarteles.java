@@ -11,9 +11,7 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.SignChangeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.ItemStack;
-import com.earth2me.essentials.Essentials;
 
-import java.math.BigDecimal;
 
 public class ListenerCarteles implements Listener {
 
@@ -59,69 +57,114 @@ public class ListenerCarteles implements Listener {
         }
     }
 
+
+
+
+
     // ---------------------------------------------------------
     // EVENTO 2: CUANDO UN JUGADOR USA EL CARTEL
     // ---------------------------------------------------------
     @EventHandler
     public void alUsarCartel(PlayerInteractEvent event) {
-        // Solo nos interesa el Clic Derecho en un Bloque
+
+        // Solo clic derecho a un bloque
         if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
 
         Block bloque = event.getClickedBlock();
-        if (bloque == null || !(bloque.getState() instanceof Sign)) return;
+        if (bloque == null) return;
+
+        // Solo si es un cartel
+        if (!(bloque.getState() instanceof Sign)) return;
 
         Sign cartel = (Sign) bloque.getState();
 
-        // Verificamos si es un cartel de NUESTRO plugin
+        // Solo si es NUESTRO cartel
         if (!cartel.getLine(0).equals(HEADER)) return;
+
+        // 🔒 AHORA SÍ: cancelamos, porque sabemos que es nuestro cartel
+        event.setCancelled(true);
 
         Player player = event.getPlayer();
 
-        // --- 1. Leer datos del cartel ---
+        // -----------------------------
+        // 1. Leer datos del cartel
+        // -----------------------------
         Material material = Material.matchMaterial(cartel.getLine(1));
+        if (material == null) {
+            player.sendMessage(ChatColor.RED + "Material inválido en el cartel.");
+            return;
+        }
+
         int cantidad;
         try {
             cantidad = Integer.parseInt(cartel.getLine(2));
         } catch (NumberFormatException e) {
-            return; // Si el cartel está mal escrito, ignoramos
+            player.sendMessage(ChatColor.RED + "Cantidad inválida en el cartel.");
+            return;
         }
 
-        // --- 2. Verificar inventario ---
-        ItemStack itemRequerido = new ItemStack(material, 1);
-        if (!player.getInventory().containsAtLeast(itemRequerido, cantidad)) {
+        // -----------------------------
+        // 2. Verificar inventario del jugador
+        // -----------------------------
+        ItemStack requerido = new ItemStack(material, 1);
+        if (!player.getInventory().containsAtLeast(requerido, cantidad)) {
             player.sendMessage(ChatColor.RED + "No tienes " + cantidad + " de " + material.name());
             return;
         }
 
-        // --- 3. Obtener Precio Base (Essentials) ---
-        Essentials ess = (Essentials) MercadoSkyblock.getInstance().getServer().getPluginManager().getPlugin("Essentials");
-        if (ess == null) return;
+        // -----------------------------
+        // 3. Obtener precio dinámico
+        // -----------------------------
+        double precioUnitario = MercadoSkyblock
+                .getGestorPrecios()
+                .getPrecioActual(material);
 
-        BigDecimal precioBaseBD = ess.getWorth().getPrice(ess, itemRequerido);
-        if (precioBaseBD == null) {
-            player.sendMessage(ChatColor.RED + "Este ítem no tiene precio base en Essentials.");
+        if (precioUnitario <= 0) {
+            player.sendMessage(ChatColor.RED + "Este ítem no se puede vender.");
             return;
         }
 
-        // --- 4. CALCULAR PRECIO DINÁMICO ---
-        // Aquí ocurre la magia: Preguntamos a tu GestorPrecios cuánto vale REALMENTE según la oferta
-        double precioUnitario = MercadoSkyblock.getGestorPrecios().calcularPrecio(material, precioBaseBD.doubleValue());
         double total = precioUnitario * cantidad;
 
-        // --- 5. Ejecutar Transacción ---
-
-        // A) Quitar ítems
-        player.getInventory().removeItem(new ItemStack(material, cantidad));
-
-        // B) Pagar dinero
+        // -----------------------------
+        // 4. Ejecutar transacción
+        // -----------------------------
+        quitarItems(player, material, cantidad);
         MercadoSkyblock.getEconomy().depositPlayer(player, total);
-
-        // C) REGISTRAR VENTA (¡Importante!)
-        // Esto aumenta el contador global y baja el precio para el siguiente
         MercadoSkyblock.getGestorPrecios().registrarVenta(material, cantidad);
 
-        // Mensaje bonito
-        player.sendMessage(ChatColor.GREEN + "Vendiste x" + cantidad + " " + material.name() +
+        // -----------------------------
+        // 5. Mensaje final
+        // -----------------------------
+        player.sendMessage(ChatColor.GREEN +
+                "Vendiste x" + cantidad + " " + material.name() +
                 " por §6$" + String.format("%.2f", total));
     }
+
+
+    private void quitarItems(Player player, Material material, int cantidad) {
+        int restante = cantidad;
+
+        ItemStack[] contents = player.getInventory().getContents();
+
+        for (int i = 0; i < contents.length; i++) {
+            ItemStack item = contents[i];
+            if (item == null || item.getType() != material) continue;
+
+            int stackAmount = item.getAmount();
+
+            if (stackAmount <= restante) {
+                contents[i] = null;
+                restante -= stackAmount;
+            } else {
+                item.setAmount(stackAmount - restante);
+                restante = 0;
+            }
+
+            if (restante <= 0) break;
+        }
+
+        player.getInventory().setContents(contents);
+    }
+
 }
